@@ -1,0 +1,210 @@
+data <- read.csv(file = 'AT2_credit_train.csv')
+test <- read.csv(file = 'AT2_credit_test.csv')
+
+
+#Remove column ID because it is not relevant
+data <- subset (data, select = -ID)
+
+#Convert to factors
+#Change 1 in SEX to M, 2 for F
+data[data$SEX == 1,]$SEX <- "M"
+data[data$SEX == 2,]$SEX <- "F"
+data$SEX <- as.factor(data$SEX)
+
+data$EDUCATION <- as.factor(data$EDUCATION)
+data$MARRIAGE <- as.factor(data$MARRIAGE)
+data$default <- as.factor(data$default)
+str(data)
+
+#split into test and train sets
+## 75% of the sample size, use floor to round down to nearest integer
+trainset_size <- floor(0.75 * nrow(data))
+set.seed(42) 
+trainset_indices <- sample(seq_len(nrow(data)), size = trainset_size)
+trainset <- data[trainset_indices, ]
+testset <- data[-trainset_indices, ]
+
+#rowcounts to check
+nrow(trainset)
+nrow(testset)
+nrow(data)
+
+# GLM #
+# AIC: 17674
+glm_model = glm(default ~ ., family = binomial(logit), data = trainset)
+summary(glm_model)
+anova(glm_model, test="Chisq")
+
+
+
+#probabilities and predictions
+testset$probability <- predict(glm_model, newdata = testset, type = "response")
+testset$prediction <- "N"
+testset[testset$probability >=0.5, "prediction"] = "Y"          #0.5 chosen as threshold
+
+
+#confusion matrix
+glm_cfm <- table(predicted = testset$prediction, true = testset$default)
+glm_cfm
+
+#Accuracy
+#0.7744114
+glm_accuracy <- (glm_cfm[2,2]+glm_cfm[1,1])/sum(glm_cfm)
+glm_accuracy
+
+#sensitivty, accuracy...using caret
+confusionMatrix(table(predicted = testset$prediction, true = testset$default))
+
+
+#Precision
+glm_precision <- glm_cfm[2,2]/(glm_cfm[2,2]+glm_cfm[2,1])
+glm_precision
+#Recall
+glm_recall <- glm_cfm[2,2]/(glm_cfm[2,2]+glm_cfm[1,2])
+glm_recall
+#f1
+glm_f1 <- 2*(glm_precision*glm_recall/(glm_precision+glm_recall))
+glm_f1
+
+#AUC
+glm_predictions <- as.data.frame(predict(glm_model, testset, type = "response"))
+plot.roc(testset$default, glm_predictions[,1], print.auc=TRUE)
+
+################ TRY UPSAMPLING ######################
+prop.table(table(data$default))
+summary(data)
+
+set.seed(111)
+trainup <- upSample(y=trainset$default,
+                    x=trainset[,-which(names(trainset)=="default")],
+                    yname = "default")
+table(trainup$default)
+
+trainup_glm <- glm(default ~ ., family = binomial(logit), data = trainup)
+summary(trainup_glm) #AIC: 30919
+
+### Probabilities and Predictions ###
+testset$probability = predict(trainup_glm, newdata = testset, type = "response")
+predicted_trainup <- predict(trainup_glm, newdata = testset, type = "response")
+testset$prediction <- "N"
+testset[testset$probability >=0.5, "prediction"] = "Y"          #0.5 chosen as threshold
+
+#Confusion Matrix
+glm_cfm <- table(predicted = testset$prediction, true = testset$default)
+glm_cfm
+
+#counts of true and predicted values:
+table(testset$default)
+table(testset$prediction)
+
+#Accuracy
+glm_accuracy <- (glm_cfm[2,2]+glm_cfm[1,1])/sum(glm_cfm)
+glm_accuracy
+#Precision
+glm_precision <- glm_cfm[2,2]/(glm_cfm[2,2]+glm_cfm[2,1])
+glm_precision
+#Recall
+glm_recall <- glm_cfm[2,2]/(glm_cfm[2,2]+glm_cfm[1,2])
+glm_recall
+#f1
+glm_f1 <- 2*(glm_precision*glm_recall/(glm_precision+glm_recall))
+glm_f1
+
+#sensitivty, accuracy...using caret
+library(caret)
+confusionMatrix(table(predicted = testset$prediction, true = testset$default))
+
+#AUC
+glm_predictions <- as.data.frame(predict(trainup_glm, testset, type = "response"))
+#using test$default and predictions (type="prob") for test test ([,2] is Y column)
+plot.roc(testset$default, glm_predictions[,1], print.auc=TRUE)
+
+#variable importance
+glm_imp <- varImp(step_glm, scale=FALSE)
+glm_imp
+
+
+
+################################# DOWNSAMPLING ######################################################
+prop.table(table(data$default))
+summary(data)
+
+traindown <- downSample(y=trainset$default,
+                    x=trainset[,-which(names(trainset)=="default")],
+                    yname = "default")
+table(traindown$default)
+
+traindown_glm <- glm(default ~ ., family = binomial(logit), data = traindown)
+summary(traindown_glm) #AIC: 11244
+
+### Probabilities and Predictions ###
+testset$probability = predict(traindown_glm, newdata = testset, type = "response")
+predicted_trainup <- predict(traindown_glm, newdata = testset, type = "response")
+testset$prediction <- "N"
+testset[testset$probability >=0.5, "prediction"] = "Y"          #0.5 chosen as threshold
+
+#Confusion Matrix
+glm_cfm <- table(predicted = testset$prediction, true = testset$default)
+glm_cfm
+
+#counts of true and predicted values:
+table(testset$default)
+table(testset$prediction)
+
+#Accuracy
+glm_accuracy <- (glm_cfm[2,2]+glm_cfm[1,1])/sum(glm_cfm)
+glm_accuracy
+
+#Accuracy table
+confusionMatrix(table(predicted = testset$prediction, true = testset$default))
+
+#AUC
+glm_predictions <- as.data.frame(predict(traindown_glm, testset, type = "response"))
+#using test$default and predictions (type="prob") for test test ([,2] is Y column)
+plot.roc(testset$default, glm_predictions[,1], print.auc=TRUE)
+
+#variable importance
+glm_imp <- varImp(step_glm, scale=FALSE)
+glm_imp
+
+
+################################# BOTH ######################################################
+library(ROSE)
+set.seed(111)
+both <- ovun.sample(default~., data = trainset, method = "both")$data
+table(both$default)
+summary(both)
+
+both_glm <- glm(default ~ ., family = binomial(logit), data = both)
+summary(both_glm)
+
+### Probabilities and Predictions ###
+testset$probability = predict(both_glm, newdata = testset, type = "response")
+predicted_trainup <- predict(both_glm, newdata = testset, type = "response")
+testset$prediction <- "N"
+testset[testset$probability >=0.5, "prediction"] = "Y"          #0.5 chosen as threshold
+
+#Confusion Matrix
+glm_cfm <- table(predicted = testset$prediction, true = testset$default)
+glm_cfm
+
+#counts of true and predicted values:
+table(testset$default)
+table(testset$prediction)
+
+#Accuracy
+glm_accuracy <- (glm_cfm[2,2]+glm_cfm[1,1])/sum(glm_cfm)
+glm_accuracy
+
+#sensitivty, accuracy...using caret
+confusionMatrix(table(predicted = testset$prediction, true = testset$default))
+
+#AUC
+glm_predictions <- as.data.frame(predict(both_glm, testset, type = "response"))
+#using test$default and predictions (type="prob") for test test ([,2] is Y column)
+plot.roc(testset$default, glm_predictions[,1], print.auc=TRUE)
+
+#variable importance
+glm_imp <- varImp(step_glm, scale=FALSE)
+glm_imp
+
