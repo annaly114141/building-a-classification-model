@@ -1,0 +1,139 @@
+data <- read.csv(file = 'AT2_credit_train.csv')
+test <- read.csv(file = 'AT2_credit_test.csv')
+str(data)
+
+library(ggplot2)
+library(GGally)
+library(e1071)
+
+#Change 1 in default to Yes, 0 for No
+data[data$default == "Y",]$default <- "1"
+data[data$default == "N",]$default <- "0"
+data$default <- as.factor(data$default)
+data$SEX <- as.factor(data$SEX)
+str(data)
+
+#Change 1 in SEX to M, 2 for F
+#filter(data, SEX == "")
+#data[data$SEX == 1,]$SEX <- "M"
+#data[data$SEX == 2,]$SEX <- "F"
+#str(data)
+
+#EDA
+ggpairs(data, ggplot2::aes(colour = default, alpha = 0.4))
+
+#Create svm model, try: kernel = linear, polynomial, signmoid
+
+mymodel <- svm(default ~. , data=data) #since default is a factor variable, classification becomes the default type
+summary(mymodel)
+#plot(mymodel, data=data,
+#SEX~EDUCATION,
+#slice = list())
+
+#data.svm = svm(default ~.,
+data=data,
+kernel = "linear",
+cost=10,
+scale = FALSE)
+#print(data.svm)
+#plot(data.svm,data)
+
+#Confusion Matrix and Misclassification Error
+#Radial: 0.2076966
+#Linear: 0.2297736
+#Polynomial: 0.2088654
+#Signmoid: 0.3250942
+pred <- predict(mymodel, data)
+tab <- table(Predicted = pred, Actual = data$default)
+tab
+1 - sum(diag(tab))/sum(tab) #missclassfication error, want the lowest misclassfication percentage
+
+
+#Tuning
+set.seed(123)
+tmodel <- tune(svm, default~., data=data_train,
+               ranges= list(epsilon = seq(0,1,0.1), cost = 2^(2:4))) #is cost is too high there will be penality, overfitting, cost is too small = underfitting, want to largeer range
+plot(tmodel) #darker region are low classfication error
+summary(tmodel)
+
+
+#Choose best model
+mymodel <- tmodel$best.model
+summary(tmodel)
+
+#Confusion matrix and Misclassfication
+pred <- predict(mymodel, data)
+tab <- table(Predicted = pred, Actual = data$default)
+tab
+
+######################### SVM 2 ############################################################
+library(e1071)
+plot(data)
+
+plot(data$LIMIT_BAL, data$BILL_AMT1, col = data$default)
+plot(data$LIMIT_BAL, data$PAY_0, col = data$default)
+
+
+s <- sample(150,100)
+col <- c("LIMIT_BAL", "BILL_AMT1", "default")
+data_train <- data[s, col]
+data_test <- data[-s,col]
+
+#rowcounts to check
+nrow(data_train)
+nrow(data_test)
+nrow(data)
+
+svmfit <- svm(default~., data=data_train, kernel="linear", cost =  0.001, scale = FALSE, probability=TRUE)
+print(svmfit)
+plot(svmfit, data_train[,col])
+
+#find optimal cost parameter, cross validation using tune function 
+tuned <- tune(svm, default~. , data = data_train, kernel = "linear", ranges = list(cost=c(0.001, 0.01, 0.1, 1, 10, 100)))
+summary(tuned)
+
+p <- predict(svmfit, data_test[,col], type="prob")
+plot(p)
+table(p, data_test[,3])
+mean(p == data_test[,3])
+
+#add probabilities to test data
+test$probability = predict(svmfit, newdata = test, type="prob")
+svm_pred <- data.frame(test$ID, test$probability)
+svm_pred <- svm_pred %>%
+  rename(
+    ID = test.ID,
+    default = test.probability
+  )
+head(svm_pred)
+nrow(svm_pred)
+
+write.csv(svm_pred, "svm_output.csv", row.names=FALSE, quote=FALSE) 
+
+
+###################   SVM 3 #######################################
+#regression with svm
+modelsvm = svm(default~BILL_AMT1, data)
+#predict using svm regression
+predYsvm = predict(modelsvm, data)
+#overlay SVM predictions on scatter plot
+points(data$BILL_AMT1, predYsvm, col="red", pch=16)
+
+
+
+#Feature scaling
+trainset[-3] = scale(trainset[-3])
+testset[-3] = scale(testset[-3])
+
+#Fitting SVM to the training set
+library(e1071)
+
+classifier = svm(formula = default ~ .,
+                 data = trainset,
+                 type = 'C-classification',
+                 kernel = 'linear')
+
+# Predicting the Test set results
+y_pred = predict(classifier, newdata = testset[-3])
+
+
