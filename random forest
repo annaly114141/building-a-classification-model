@@ -1,0 +1,152 @@
+#--------------------------------------------------------------------------------------------------------------------------
+#Install Dependencies
+#--------------------------------------------------------------------------------------------------------------------------
+rm(list = ls())
+Sys.setlocale("LC_ALL", "English")
+library(ggplot2)
+library(tidyverse)
+library(dplyr)
+library(caret)
+library(ROSE)
+#--------------------------------------------------------------------------------------------------------------------------
+
+#--------------------------------------------------------------------------------------------------------------------------
+# References
+#--------------------------------------------------------------------------------------------------------------------------
+#Data processing: https://statisticsglobe.com/convert-character-to-numeric-in-r/
+#--------------------------------------------------------------------------------------------------------------------------
+
+
+#--------------------------------------------------------------------------------------------------------------------------
+# Import and view data
+#--------------------------------------------------------------------------------------------------------------------------
+train <- read.csv(file = '/Users/admin/Downloads/UTS master degree/36106 Data, Algorithms and Meaning/AT2/MLAA AT2 files (AUT 2022)/AT2_credit_train.csv')
+test <- read.csv(file = '/Users/admin/Downloads/UTS master degree/36106 Data, Algorithms and Meaning/AT2/MLAA AT2 files (AUT 2022)/AT2_credit_test.csv')
+#--------------------------------------------------------------------------------------------------------------------------
+
+#--------------------------------------------------------------------------------------------------------------------------
+# Exploratory Data Analysis
+#--------------------------------------------------------------------------------------------------------------------------
+view(train)
+sum(duplicated(train$ID))
+
+barplot(table(train$SEX), main='Sex Distribution')
+barplot(table(train$EDUCATION), main='Education Distribution')
+barplot(table(train$MARRIAGE), main='Marriage Status Distribution')
+barplot(table(train$AGE), main='Age Distribution')
+barplot(table(train$PAY_0), main='Pay_0 Distribution')
+barplot(table(train$PAY_2), main='Pay_2 Distribution')
+barplot(table(train$PAY_3), main='Pay_3 Distribution')
+barplot(table(train$PAY_4), main='Pay_4 Distribution')
+barplot(table(train$PAY_5), main='Pay_5 Distribution')
+barplot(table(train$PAY_6), main='Pay_6 Distribution')
+barplot(table(train$default), main='Target Class Distribution')
+
+plot.ts(train$BILL_AMT3)
+train$default <- factor(train$default)
+
+#--------------------------------------------------------------------------------------------------------------------------
+# Data Processing
+#--------------------------------------------------------------------------------------------------------------------------
+train <- train %>% mutate(default = ifelse(default == "N",0,1))
+train$default <- as.factor(train$default)
+is.factor(train$default)
+
+train['EDUCATION'][train['EDUCATION']==0] <- 4
+# Make sure all features are either num, int or factor for categorical.
+train$SEX <- as.numeric(train$SEX)
+str(train)
+
+barplot(prop.table(table(train$default)),
+        col = rainbow(2),
+        ylim = c(0, 0.7),
+        main = "Class Distribution")
+
+# Binarise PAY_AMTX features
+train_bin <- train
+for (i in colnames(train_bin)){
+  if (startsWith(i, 'PAY_AMT')){
+    train_bin[i][train_bin[i]!=0] <- 1
+  }
+}
+
+# Remove unwanted rows
+train_f <- subset(train_bin, train_bin$LIMIT_BAL!=-99 & train_bin$AGE<=79)
+#exclude the ID column
+train_f$ID <- NULL
+
+# Split data
+set.seed(42)
+ind <- sample(2, nrow(train_f), replace = TRUE, prob = c(0.8, 0.2))
+trainset <- train_f[ind==1,]
+testset <- train_f[ind==2,]
+
+# Oversampling
+over <- ovun.sample(default~., data = trainset, method = "over")$data
+table(over$default)
+
+# Unsersampling
+under <- ovun.sample(default~., data=trainset, method = "under")$data
+table(under$default)
+
+# ROSE
+rose <- ROSE(default~., data = trainset)$data
+table(rose$default)
+
+#--------------------------------------------------------------------------------------------------------------------------
+
+#--------------------------------------------------------------------------------------------------------------------------
+# Modelling
+#--------------------------------------------------------------------------------------------------------------------------
+
+## Random Forest ##
+# Build random forest model
+
+library(randomForest)
+# Model with oversampling
+credit_over_rf <- randomForest(default~.,data = over,
+                               importance=TRUE, xtest=testset[,-ncol(over)], ntree=100, keep.forest = TRUE) 
+
+# Model with undersampling
+
+credit_under_rf <- randomForest(default~.,data = under, 
+                                importance=TRUE, xtest=testset[,-ncol(under)], ntree=100) 
+
+# Model with ROSE
+credit_ROSE_rf <- randomForest(default~.,data = rose,
+                               importance=TRUE, xtest=testset[,-ncol(rose)], ntree=100) 
+
+# Predictions for test set that was splitted from train set
+
+# Predictions with oversampling model
+test_predictions_over_rf <- data.frame(testset,credit_over_rf$test$predicted)
+
+
+test_predictions_under_rf <- data.frame(testset,credit_under_rf$test$predicted)
+
+test_predictions_ROSE_rf <- data.frame(testset,credit_ROSE_rf$test$predicted)
+
+# Accuracy for test set
+mean(credit_over_rf$test$predicted==testset$default)
+mean(credit_under_rf$test$predicted==testset$default)
+mean(credit_ROSE_rf$test$predicted==testset$default)
+
+# Predict for provided test set 
+
+# Exclude ID column in the test set:
+test_noID = subset(test, select = - c(ID))
+# Binarise PAY_AMTX features
+test_bin <- test_noID
+for (i in colnames(test_bin)){
+  if (startsWith(i, 'PAY_AMT')){
+    test_bin[i][test_bin[i]!=0] <- 1
+  }
+}
+
+test$prediction = predict(credit_over_rf, newdata = test_bin, type = 'prob')
+
+# extract result to csv file
+result = subset(test, select = c("ID", "prediction"))
+write.csv(result, "/Users/admin/Downloads/UTS master degree/36106 Data, Algorithms and Meaning/AT2/MLAA AT2 files (AUT 2022)/result_rf.csv", row.names = FALSE)
+
+#--------------------------------------------------------------------------------------------------------------------------
